@@ -1,7 +1,13 @@
 #include "status_led.h"
 #include <Arduino.h>
 
-#if defined(OPK_BOARD_MDBT50Q_CX_40)
+#if defined(OPK_BOARD_PCA10059)
+#include <nrf_gpio.h>
+
+#define WAKE_LED_PIN NRF_GPIO_PIN_MAP(0, 6)
+#undef WAKE_LED_ON
+#define WAKE_LED_ON LOW
+#elif defined(OPK_BOARD_MDBT50Q_CX_40)
 #include <nrf_gpio.h>
 
 // The borrowed RX variant does not map the CX-40's active-low P0.08 LED.
@@ -18,7 +24,7 @@ static bool g_lit = false;
 
 static void ledWrite(int level)
 {
-#if defined(OPK_BOARD_MDBT50Q_CX_40)
+#if defined(OPK_BOARD_MDBT50Q_CX_40) || defined(OPK_BOARD_PCA10059)
 	nrf_gpio_pin_write(WAKE_LED_PIN, level);
 #else
 	digitalWrite(WAKE_LED_PIN_A, level);
@@ -28,7 +34,7 @@ static void ledWrite(int level)
 
 void ledInit()
 {
-#if defined(OPK_BOARD_MDBT50Q_CX_40)
+#if defined(OPK_BOARD_MDBT50Q_CX_40) || defined(OPK_BOARD_PCA10059)
 	nrf_gpio_cfg_output(WAKE_LED_PIN);
 #else
 	pinMode(WAKE_LED_PIN_A, OUTPUT);

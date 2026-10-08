@@ -196,8 +196,12 @@ static const char *frEvtStr(uint8_t e)
 // priority-1 interrupts still run (PRIMASK-off hangs leave no record -- same caveat as the WDT capture, and
 // itself a signal); a task that is RUNNING (not blocked) has a stale TCB pxTopOfStack, so cross-check its PC
 // against irqPC.
+#if defined(OPK_BOARD_PCA10059)
+#define BB_ADDR 0xD8000UL
+#else
 #define BB_ADDR \
 	0xE8000UL // raw page: app image (~170 KB, ends < 0x60000) < here < InternalFS (0xED000)
+#endif
 #define BB_MAGIC 0x62627831u // "bbx1"
 #define BB_WORDS 12
 static TaskHandle_t g_hLoop,

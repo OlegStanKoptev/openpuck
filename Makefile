@@ -63,6 +63,7 @@ UF2_OUTPUT_DIR ?= build/openpuck
 # the bottom swallows it so make doesn't try to build the port path as a target.
 FLASH_PORT := $(filter-out format format-check check build build-raytac \
 	package-raytac flash-raytac deploy-raytac provision-raytac-softdevice \
+	build-pca10059 package-pca10059 flash-pca10059 deploy-pca10059 provision-pca10059-softdevice \
 	build-recovery reversepuck reversepuck-flash reversepuck-deploy flash deploy,$(MAKECMDGOALS))
 UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" OpenPuck
 
@@ -74,6 +75,7 @@ RP_UPLOAD = arduino-cli upload -b $(FQBN) -p "$(FLASH_PORT)" ReversePuckFirmware
 
 .PHONY: format format-check check build build-raytac uf2 package-raytac \
 	flash-raytac deploy-raytac provision-raytac-softdevice build-recovery \
+	build-pca10059 package-pca10059 flash-pca10059 deploy-pca10059 provision-pca10059-softdevice \
 	reversepuck reversepuck-flash reversepuck-deploy flash deploy
 
 ## Compile the firmware with the required USB flags baked in. Override CFG_TUD_HID / CFG_TUD_TASK_QUEUE_SZ /
@@ -129,6 +131,57 @@ provision-raytac-softdevice:
 		--softdevice "$(SOFTDEVICE_HEX)" \
 		build/raytac/s140-6.1.1.zip
 	nrfutil device program --firmware build/raytac/s140-6.1.1.zip \
+		--traits nordicDfu
+
+## Build for the Nordic nRF52840 Dongle (PCA10059). Its Open DFU bootloader starts at 0xE0000, so the app,
+## the black-box page and InternalFS are moved below it; InternalFS comes from a patched copy of the core library.
+PCA10059_CORE_LIB = $(lastword $(wildcard $(shell arduino-cli config get directories.data)/packages/adafruit/hardware/nrf52/*/libraries/InternalFileSytem))
+build-pca10059:
+	rm -rf build/pca10059/lib && mkdir -p build/pca10059/lib build/cache/pca10059
+	cp -R "$(PCA10059_CORE_LIB)" build/pca10059/lib/InternalFileSytem
+	sed -i.orig 's/0xED000/0xD9000/' build/pca10059/lib/InternalFileSytem/src/InternalFileSystem.cpp
+	sed -i.orig 's/0xF4000/0xE0000/' build/pca10059/lib/InternalFileSytem/src/flash/flash_nrf5x.c
+	arduino-cli compile --clean -b adafruit:nrf52:mdbt50qrx \
+		--build-path build/cache/pca10059 \
+		--output-dir build/pca10059 \
+		--library build/pca10059/lib/InternalFileSytem \
+		--build-property "build.ldscript=$(CURDIR)/tools/pca10059/nrf52840_s140_v6_pca10059.ld" \
+		--build-property "build.extra_flags=$(USB_EXTRA_FLAGS) -DOPK_BOARD_PCA10059=1" \
+		--build-property "compiler.c.elf.extra_flags=$(OPENPUCK_LINK_FLAGS)" OpenPuck
+
+package-pca10059:
+	@test -f build/pca10059/OpenPuck.ino.hex || { \
+		echo "run 'make build-pca10059' first"; exit 1; }
+	$(RM) build/pca10059/OpenPuck-pca10059.zip
+	nrfutil nrf5sdk-tools pkg generate --hw-version 52 --sd-req 0xB6 \
+		--application-version 1 \
+		--application build/pca10059/OpenPuck.ino.hex \
+		build/pca10059/OpenPuck-pca10059.zip
+
+flash-pca10059:
+	@test -f build/pca10059/OpenPuck-pca10059.zip || { \
+		echo "run 'make package-pca10059' first"; exit 1; }
+	nrfutil device program \
+		--firmware build/pca10059/OpenPuck-pca10059.zip \
+		--traits nordicDfu
+
+deploy-pca10059:
+	$(MAKE) build-pca10059
+	$(MAKE) package-pca10059
+	$(MAKE) flash-pca10059
+
+## One-time S140 6.1.1 provisioning for PCA10059. A factory dongle has no SoftDevice, hence --sd-req 0x00.
+provision-pca10059-softdevice:
+	@test -f "$(SOFTDEVICE_HEX)" || { \
+		echo "set SOFTDEVICE_HEX to Nordic's S140 6.1.1 HEX"; \
+		exit 1; }
+	mkdir -p build/pca10059
+	$(RM) build/pca10059/s140-6.1.1.zip
+	nrfutil nrf5sdk-tools pkg generate --hw-version 52 \
+		--sd-req 0x00,0xAE,0xB6 --sd-id 0xB6 \
+		--softdevice "$(SOFTDEVICE_HEX)" \
+		build/pca10059/s140-6.1.1.zip
+	nrfutil device program --firmware build/pca10059/s140-6.1.1.zip \
 		--traits nordicDfu
 
 ## One-time factory-reset recovery image (wipes persistent storage once on first boot). See §6 of the build doc.
